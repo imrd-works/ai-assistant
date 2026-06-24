@@ -1,0 +1,24 @@
+# GUI (кроссплатформенный полупрозрачный оверлей).
+# Полный пакет PySide6 включает QtWebEngine (Addons) — он нужен для
+# веб-интерфейса 1:1 с макетом (presenter_overlay/web/index.html).
+# Если ставишь PySide6-Essentials отдельно — добавь ещё PySide6-Addons.
+PySide6>=6.6
+
+# Локальное распознавание речи (Whisper) — работает офлайн на CPU
+faster-whisper>=1.0
+
+# Захват микрофона
+sounddevice>=0.4
+numpy>=1.24
+
+# Запросы к DeepSeek / OpenRouter
+requests>=2.31
+
+# Глобальные горячие клавиши (вкл/выкл микрофона, отправка)
+pynput>=1.7
+
+# Захват экрана для отправки скриншота в vision-модель
+mss>=9.0
+
+# Скрытие окна от захвата экрана на macOS (на Windows/Linux не требуется)
+pyobjc-framework-Cocoa>=10.0 ; sys_platform == "darwin"

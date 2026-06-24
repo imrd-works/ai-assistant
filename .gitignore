@@ -1,0 +1,39 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# ---- Виртуальные окружения ----
+.venv/
+venv/
+env/
+.python-version
+
+# ---- Локальные настройки и секреты ----
+# settings.json приложения хранится в ~/.config, но на всякий случай:
+settings.json
+.env
+.env.*
+*.key
+*.pem
+secrets.*
+
+# ---- Модели Whisper (большие, качаются сами) ----
+*.bin
+models/
+.cache/
+
+# ---- ОС ----
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---- Редакторы / IDE ----
+.idea/
+.vscode/
+*.swp
+*~

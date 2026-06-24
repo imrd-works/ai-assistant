@@ -1,0 +1,673 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; background: transparent; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI",
+                 system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden; color: #20242e; user-select: none;
+  }
+  input, textarea { font-family: inherit; }
+  input:focus, textarea:focus { outline: none; }
+  ::-webkit-scrollbar { width: 8px; }
+  ::-webkit-scrollbar-thumb { background: rgba(20,24,32,0.18); border-radius: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+
+  @keyframes wv { 0%,100% { transform: scaleY(0.35); } 50% { transform: scaleY(1); } }
+  @keyframes pulse {
+    0% { box-shadow: 0 0 0 0 rgba(24,165,88,0.45); }
+    70% { box-shadow: 0 0 0 9px rgba(24,165,88,0); }
+    100% { box-shadow: 0 0 0 0 rgba(24,165,88,0); }
+  }
+  @keyframes fadein { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:none; } }
+
+  /* ===== Панель (всё окно) ===== */
+  #panel {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    border-radius: 22px; overflow: hidden;
+    background: rgba(250,251,253,0.86);
+    backdrop-filter: blur(36px) saturate(1.35);
+    -webkit-backdrop-filter: blur(36px) saturate(1.35);
+    border: 1px solid rgba(255,255,255,0.65);
+    box-shadow: 0 24px 60px rgba(15,20,30,0.45), inset 0 1px 0 rgba(255,255,255,0.78);
+  }
+  .view { display: none; flex-direction: column; height: 100%; }
+  .view.active { display: flex; }
+
+  /* ===== Шапка ===== */
+  .titlebar {
+    display: flex; align-items: center; gap: 10px;
+    padding: 11px 12px; border-bottom: 1px solid rgba(20,24,32,0.06);
+  }
+  .mic-chip {
+    display: flex; align-items: center; gap: 7px;
+    padding: 5px 11px 5px 9px; border-radius: 999px; border: none;
+    cursor: pointer; background: rgba(20,24,32,0.06); color: #7b8290;
+    font: 600 12px/1 inherit; transition: background .15s, color .15s;
+  }
+  .mic-chip.on { background: rgba(24,165,88,0.14); color: #0f7a40; }
+  .mic-dot { flex:none; width:8px; height:8px; border-radius:50%; background:#aeb4bf; }
+  .mic-chip.on .mic-dot { background:#18a558; animation: pulse 1.8s infinite; }
+  .mic-wave { display:none; align-items:flex-end; gap:2px; height:13px; color:#0f7a40; }
+  .mic-chip.on .mic-wave { display:flex; }
+  .mic-wave span {
+    width:2.5px; height:100%; border-radius:2px; background:currentColor;
+    transform-origin:bottom; animation: wv 0.9s ease-in-out infinite;
+  }
+  .mic-wave span:nth-child(2){ animation-delay:.15s; }
+  .mic-wave span:nth-child(3){ animation-delay:.3s; }
+  .mic-wave span:nth-child(4){ animation-delay:.45s; }
+
+  .drag {
+    flex:1; display:flex; align-items:center; justify-content:center; gap:8px;
+    cursor: grab; height: 30px;
+  }
+  .drag:active { cursor: grabbing; }
+  .dots { display:grid; grid-template-columns:repeat(2,3px); gap:3px; }
+  .dots i { width:3px; height:3px; border-radius:50%; background:#b9bcc4; display:block; }
+  .drag-title { font: 650 13px/1 inherit; color:#3a4250; }
+
+  .icon-btn {
+    display:flex; align-items:center; justify-content:center; width:30px; height:30px;
+    border:1px solid rgba(20,24,32,0.07); border-radius:10px;
+    background:rgba(255,255,255,0.6); color:#5b6472; cursor:pointer;
+  }
+  .icon-btn:hover { background:rgba(255,255,255,0.95); color:#20242e; }
+
+  /* ===== Лента сообщений ===== */
+  .feed {
+    flex:1; overflow-y:auto; padding:16px 14px; display:flex;
+    flex-direction:column; gap:12px;
+  }
+  .row { display:flex; animation: fadein .25s ease both; }
+  .row.user { justify-content:flex-end; }
+  .row.assistant, .row.system { justify-content:flex-start; }
+  .bubble {
+    font: 450 14px/1.55 inherit; word-wrap:break-word; overflow-wrap:anywhere;
+  }
+  .bubble.user {
+    max-width:78%; padding:9px 13px; border-radius:16px 16px 4px 16px;
+    background:#2f6bff; color:#fff; box-shadow:0 4px 14px rgba(47,107,255,0.32);
+  }
+  .bubble.assistant {
+    max-width:90%; padding:11px 14px; border-radius:16px 16px 16px 4px;
+    background:rgba(255,255,255,0.78); border:1px solid rgba(255,255,255,0.7);
+    color:#20242e; box-shadow:0 6px 18px rgba(20,28,45,0.08); user-select:text;
+  }
+  .bubble.system {
+    max-width:90%; padding:9px 13px; border-radius:14px;
+    background:rgba(47,107,255,0.08); border:1px solid rgba(47,107,255,0.18);
+    color:#3a4250; font-size:12.5px;
+  }
+  .bubble pre, .bubble code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .bubble .codeblock {
+    margin-top:9px; padding:9px 11px; border-radius:9px; background:#11151c;
+    color:#d8dee9; font:450 12px/1.5 ui-monospace,Menlo,monospace;
+    white-space:pre-wrap; overflow-x:auto;
+  }
+  .bubble .inlinecode {
+    background:#11151c; color:#e6edf3; border-radius:4px; padding:1px 5px; font-size:12.5px;
+  }
+
+  /* ===== Чипы-подсказки ===== */
+  .chips { display:flex; gap:8px; padding:0 14px 10px; }
+  .chip {
+    display:flex; align-items:center; gap:6px; padding:7px 12px; border-radius:999px;
+    border:1px solid rgba(20,24,32,0.08); background:rgba(255,255,255,0.6);
+    color:#4a5260; font:550 12.5px/1 inherit; cursor:pointer;
+  }
+  .chip:hover:not(:disabled) { background:rgba(255,255,255,0.95); color:#20242e; }
+  .chip:disabled { opacity:.45; cursor:default; }
+
+  /* ===== Композер ===== */
+  .composer {
+    display:flex; align-items:center; gap:8px;
+    padding:11px 12px 13px; border-top:1px solid rgba(20,24,32,0.06);
+  }
+  .composer textarea {
+    flex:1; height:42px; max-height:120px; resize:none; padding:11px 14px;
+    border-radius:13px; background:rgba(255,255,255,0.7);
+    border:1px solid rgba(20,24,32,0.1); color:#20242e; font:450 14px/1.2 inherit;
+  }
+  .composer textarea:focus { border-color: rgba(47,107,255,0.5); }
+  .cbtn {
+    flex:none; display:flex; align-items:center; justify-content:center;
+    width:42px; height:42px; border-radius:13px; cursor:pointer;
+  }
+  .cbtn.mic { border:none; color:#fff; background:#aeb4bf; }
+  .cbtn.mic.on { background:#18a558; box-shadow:0 6px 16px rgba(24,165,88,0.4); }
+  .cbtn.ghost { border:1px solid rgba(20,24,32,0.08); background:rgba(255,255,255,0.6); color:#3a4250; }
+  .cbtn.ghost:hover { background:rgba(255,255,255,0.95); }
+  .cbtn.send { border:none; background:#2f6bff; color:#fff; box-shadow:0 6px 16px rgba(47,107,255,0.4); }
+  .cbtn.send:disabled { background:rgba(20,24,32,0.18); box-shadow:none; cursor:default; }
+
+  .status {
+    padding:0 14px 8px; font:450 11.5px/1.3 inherit; color:#8a909c;
+    min-height:0; display:none;
+  }
+  .status.show { display:block; }
+
+  /* ===== Настройки ===== */
+  .settings-head {
+    display:flex; align-items:center; gap:10px;
+    padding:13px 14px; border-bottom:1px solid rgba(20,24,32,0.06);
+  }
+  .back-btn {
+    display:flex; align-items:center; gap:5px; padding:5px 10px 5px 7px;
+    border:1px solid rgba(20,24,32,0.07); border-radius:9px;
+    background:rgba(255,255,255,0.6); color:#4a5260; font:600 12.5px/1 inherit; cursor:pointer;
+  }
+  .back-btn:hover { background:rgba(255,255,255,0.95); color:#20242e; }
+  .settings-title { font:650 15px/1 inherit; color:#26242e; }
+
+  .tabs { display:flex; gap:4px; padding:10px 12px 0; }
+  .tab {
+    padding:8px 12px; border:none; background:transparent; border-radius:9px 9px 0 0;
+    font:600 12.5px/1 inherit; cursor:pointer; white-space:nowrap; color:#8a909c;
+  }
+  .tab:hover { color:#4a5260; }
+  .tab.active { color:#2f6bff; box-shadow: inset 0 -2px 0 #2f6bff; }
+  .tabline { height:1px; background:rgba(20,24,32,0.06); }
+
+  .body { flex:1; overflow-y:auto; padding:18px; }
+  .tabpage { display:none; flex-direction:column; gap:15px; }
+  .tabpage.active { display:flex; }
+
+  .field label, .lbl {
+    display:block; font:600 13px/1.2 inherit; color:#3a4250; margin-bottom:6px;
+  }
+  .hint { font:400 12px/1.4 inherit; color:#8a909c; margin:-2px 0 6px; }
+  .input, select.input {
+    width:100%; height:40px; padding:0 13px; border-radius:11px;
+    background:rgba(255,255,255,0.7); border:1px solid rgba(20,24,32,0.12);
+    color:#20242e; font:450 13.5px/1 inherit; -webkit-appearance:none; appearance:none;
+  }
+  textarea.input { height:auto; min-height:64px; padding:11px 13px; line-height:1.5; resize:vertical; }
+  select.input {
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%239aa1ad' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'><path d='M6 9l6 6 6-6'/></svg>");
+    background-repeat:no-repeat; background-position: right 11px center; padding-right:34px;
+  }
+  .input:focus, textarea.input:focus, select.input:focus { border-color: rgba(47,107,255,0.5); }
+
+  .row-between { display:flex; align-items:center; justify-content:space-between; }
+  .mini-btn {
+    padding:6px 11px; border-radius:8px; border:1px solid rgba(20,24,32,0.1);
+    background:rgba(255,255,255,0.6); color:#4a5260; font:550 12px/1 inherit; cursor:pointer;
+  }
+  .mini-btn:hover { background:rgba(255,255,255,0.95); }
+
+  /* слайдер плотности */
+  .slider-row { display:flex; align-items:center; gap:14px; }
+  input[type=range] { flex:1; accent-color:#2f6bff; height:4px; }
+  .slider-val { flex:none; width:46px; text-align:right; font:650 14px/1 ui-monospace,Menlo,monospace; color:#2f6bff; }
+  .preview { padding:16px; border-radius:14px; border:1px solid rgba(255,255,255,0.6); font:450 14px/1.5 inherit; color:#20242e; }
+
+  /* тумблер */
+  .toggle { display:flex; align-items:center; justify-content:space-between; cursor:pointer; gap:12px; }
+  .toggle span.t-label { font:450 13.5px/1.35 inherit; color:#3a4250; }
+  .switch { position:relative; flex:none; width:42px; height:24px; border-radius:999px; background:rgba(20,24,32,0.16); transition:background .15s; }
+  .switch.on { background:#2f6bff; }
+  .switch i { position:absolute; top:2px; left:2px; width:20px; height:20px; border-radius:50%; background:#fff; box-shadow:0 1px 3px rgba(0,0,0,.25); transition:left .15s; }
+  .switch.on i { left:20px; }
+
+  /* поле захвата хоткея */
+  .hk-row { display:flex; align-items:center; gap:10px; }
+  .hk-name { flex:none; width:130px; font:600 13px/1.3 inherit; color:#3a4250; }
+  .hk-cap {
+    flex:1; display:flex; align-items:center; height:38px; padding:0 12px;
+    border-radius:9px; background:rgba(255,255,255,0.7); border:1px solid rgba(20,24,32,0.12);
+    color:#3a4250; font:450 13px/1 inherit; cursor:pointer;
+  }
+  .hk-cap.empty { color:#9aa1ad; }
+  .hk-cap.capturing { border-color:#2f6bff; color:#2f6bff; }
+  .hk-clear { flex:none; width:34px; height:34px; border-radius:9px; border:1px solid rgba(20,24,32,0.1); background:rgba(255,255,255,0.6); color:#7b8290; cursor:pointer; }
+
+  .footer { padding:10px 14px 14px; border-top:1px solid rgba(20,24,32,0.06); display:flex; gap:8px; }
+  .btn-primary { padding:9px 18px; border-radius:10px; border:none; background:#2f6bff; color:#fff; font:600 13px/1 inherit; cursor:pointer; box-shadow:0 6px 16px rgba(47,107,255,0.32); }
+  .btn-primary:hover { background:#2860f0; }
+  .btn-flat { padding:9px 16px; border-radius:10px; border:1px solid rgba(20,24,32,0.1); background:rgba(255,255,255,0.6); color:#4a5260; font:600 13px/1 inherit; cursor:pointer; }
+  .btn-flat:hover { background:rgba(255,255,255,0.95); }
+  .btn-danger { margin-left:auto; padding:9px 14px; border-radius:10px; border:1px solid rgba(220,72,60,0.3); background:rgba(220,72,60,0.1); color:#c63a2e; font:600 13px/1 inherit; cursor:pointer; }
+  .btn-danger:hover { background:rgba(220,72,60,0.2); }
+</style>
+</head>
+<body>
+<div id="panel">
+
+  <!-- ================= ЧАТ ================= -->
+  <div id="chatView" class="view active">
+    <div class="titlebar">
+      <button id="micChip" class="mic-chip" title="Микрофон">
+        <span class="mic-dot"></span>
+        <span class="mic-wave"><span></span><span></span><span></span><span></span></span>
+        <span id="micChipLabel">Микрофон</span>
+      </button>
+      <div class="drag" id="dragHandle">
+        <span class="dots"><i></i><i></i><i></i><i></i><i></i><i></i></span>
+        <span class="drag-title">Суфлёр</span>
+      </div>
+      <button id="openSettings" class="icon-btn" title="Настройки">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="8" x2="20" y2="8"/><circle cx="9" cy="8" r="2.3" fill="rgba(250,251,253,0.95)"/><line x1="4" y1="16" x2="20" y2="16"/><circle cx="15" cy="16" r="2.3" fill="rgba(250,251,253,0.95)"/></svg>
+      </button>
+    </div>
+
+    <div id="feed" class="feed"></div>
+
+    <div id="status" class="status"></div>
+
+    <div class="chips">
+      <button id="moreBtn" class="chip" disabled>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg>Подробнее</button>
+      <button id="variantBtn" class="chip" disabled>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M3 11a8 8 0 0 1 14-5l3 2"/><path d="M21 13a8 8 0 0 1-14 5l-3-2"/><path d="M20 3v5h-5"/><path d="M4 21v-5h5"/></svg>Ещё вариант</button>
+    </div>
+
+    <div class="composer">
+      <button id="micBtn" class="cbtn mic" title="Микрофон">
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><line x1="12" y1="18" x2="12" y2="21"/></svg>
+      </button>
+      <textarea id="draft" placeholder="Спросить вручную…" rows="1"></textarea>
+      <button id="shotBtn" class="cbtn ghost" title="Скриншот → модель">
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="13" rx="2.5"/><circle cx="12" cy="12.5" r="3.2"/><path d="M8.5 6l1.3-2h4.4l1.3 2"/></svg>
+      </button>
+      <button id="sendBtn" class="cbtn send" title="Отправить" disabled>
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h13"/><path d="M12 6l6 6-6 6"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- ================= НАСТРОЙКИ ================= -->
+  <div id="settingsView" class="view">
+    <div class="settings-head">
+      <button id="backBtn" class="back-btn">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M14 6l-6 6 6 6"/></svg>Назад</button>
+      <span class="settings-title">Настройки</span>
+    </div>
+
+    <div class="tabs" id="tabs">
+      <button class="tab active" data-tab="view">Вид</button>
+      <button class="tab" data-tab="audio">Аудио</button>
+      <button class="tab" data-tab="models">Модели</button>
+      <button class="tab" data-tab="shot">Скриншот</button>
+      <button class="tab" data-tab="keys">Клавиши</button>
+    </div>
+    <div class="tabline"></div>
+
+    <div class="body">
+      <!-- Вид -->
+      <div class="tabpage active" data-page="view">
+        <div class="field">
+          <label>Фон оверлея</label>
+          <div class="hint">Плотность области ответов</div>
+          <div class="slider-row">
+            <input type="range" id="bgRange" min="25" max="100" value="75">
+            <span class="slider-val" id="bgVal">75%</span>
+          </div>
+        </div>
+        <div class="preview" id="bgPreview">Пример ответа на этом фоне — текст должен оставаться читаемым.</div>
+      </div>
+
+      <!-- Аудио -->
+      <div class="tabpage" data-page="audio">
+        <div class="field">
+          <div class="row-between" style="margin-bottom:6px;">
+            <span class="lbl" style="margin:0;">Микрофон</span>
+            <button class="mini-btn" id="reloadMics">Обновить</button>
+          </div>
+          <select class="input" id="micSelect"></select>
+        </div>
+        <div class="field">
+          <label>Язык распознавания (Whisper)</label>
+          <select class="input" id="langSelect">
+            <option value="ru">Русский</option>
+            <option value="en">English</option>
+            <option value="auto">Авто</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Модель Whisper</label>
+          <div class="hint">Больше = точнее, но медленнее</div>
+          <select class="input" id="whisperSelect">
+            <option>tiny</option><option>base</option><option>small</option>
+            <option>medium</option><option>large-v3</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Режим ответа</label>
+          <select class="input" id="modeSelect">
+            <option value="text">Текст: Whisper → DeepSeek</option>
+            <option value="audio">Аудио: модель слушает звук напрямую</option>
+          </select>
+        </div>
+        <label class="toggle"><span class="t-label">Авто-ответ — модель отвечает сама, без кнопки</span>
+          <span class="switch" id="autoSwitch"><i></i></span></label>
+        <label class="toggle"><span class="t-label">Выключать микрофон после отправки</span>
+          <span class="switch" id="stopSwitch"><i></i></span></label>
+      </div>
+
+      <!-- Модели -->
+      <div class="tabpage" data-page="models">
+        <div class="field">
+          <label>API-ключ DeepSeek / OpenRouter</label>
+          <input class="input" id="apiKey" type="password" placeholder="sk-…">
+          <div class="hint" style="margin-top:6px;">Хранится локально в ~/.config/presenter-overlay</div>
+        </div>
+        <div class="field">
+          <label>Модель ответа (текстовый режим)</label>
+          <select class="input" id="modelSelect">
+            <option value="deepseek-chat">deepseek-chat (V3)</option>
+            <option value="deepseek-reasoner">deepseek-reasoner (R1)</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Аудио-модель</label>
+          <input class="input" id="audioModel" list="audioModelList" placeholder="provider/model">
+          <datalist id="audioModelList"></datalist>
+        </div>
+        <div class="field">
+          <label>Vision-модель для скриншотов</label>
+          <input class="input" id="visionModel" list="visionModelList" placeholder="provider/model">
+          <datalist id="visionModelList"></datalist>
+        </div>
+      </div>
+
+      <!-- Скриншот -->
+      <div class="tabpage" data-page="shot">
+        <div class="field">
+          <label>Что делать со скриншотом</label>
+          <div class="hint">Инструкция модели</div>
+          <textarea class="input" id="shotPrompt" rows="3"></textarea>
+        </div>
+        <div style="display:flex; gap:8px;">
+          <button class="btn-flat" id="selRegion" style="flex:1;">Выделить область</button>
+          <button class="btn-flat" id="fullScreen" style="flex:1;">Весь экран</button>
+        </div>
+        <div class="hint" id="regionLabel">Область: весь экран.</div>
+      </div>
+
+      <!-- Клавиши -->
+      <div class="tabpage" data-page="keys">
+        <div class="hint">Горячие клавиши работают вне фокуса окна. Кликни в поле и нажми сочетание.</div>
+        <div class="hk-row"><span class="hk-name">Микрофон вкл/выкл</span>
+          <div class="hk-cap empty" data-hk="mic">Press shortcut…</div>
+          <button class="hk-clear" data-clear="mic">✕</button></div>
+        <div class="hk-row"><span class="hk-name">Отправить запрос</span>
+          <div class="hk-cap empty" data-hk="send">Press shortcut…</div>
+          <button class="hk-clear" data-clear="send">✕</button></div>
+        <div class="hk-row"><span class="hk-name">Скриншот → модель</span>
+          <div class="hk-cap empty" data-hk="shot">Press shortcut…</div>
+          <button class="hk-clear" data-clear="shot">✕</button></div>
+        <div class="hint">На macOS дай доступ в Системные настройки → Конфиденциальность → Универсальный доступ.</div>
+        <div class="field">
+          <label>Контекст для промпта</label>
+          <textarea class="input" id="context" rows="3" placeholder="Например: тема созвона, продукт, роль собеседника, важные факты…"></textarea>
+        </div>
+      </div>
+    </div>
+
+    <div class="footer">
+      <button class="btn-primary" id="saveBtn">Сохранить</button>
+      <button class="btn-flat" id="clearBtn">Очистить чат</button>
+      <button class="btn-danger" id="quitBtn">✕ Закрыть</button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+let bridge = null;
+const $ = (id) => document.getElementById(id);
+const esc = (s) => (s || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+
+const S = { listening:false, sending:false, hasAnswer:false, mode:"text", hk:{} };
+
+function escAttr(s){ return esc(s); }
+
+// ---- сообщения ----
+function renderMessages(list){
+  const feed = $("feed");
+  feed.innerHTML = "";
+  S.hasAnswer = false;
+  list.forEach(m => {
+    const row = document.createElement("div");
+    row.className = "row " + m.role;
+    const b = document.createElement("div");
+    b.className = "bubble " + m.role;
+    if (m.role === "assistant" && m.html) { b.innerHTML = m.html; }
+    else { b.textContent = m.text; }
+    row.appendChild(b);
+    feed.appendChild(row);
+    if (m.role === "assistant" && m.text && m.text !== "…") S.hasAnswer = true;
+  });
+  feed.scrollTop = feed.scrollHeight;
+  updateFollowups();
+}
+
+function updateFollowups(){
+  const en = S.hasAnswer && !S.sending;
+  $("moreBtn").disabled = !en;
+  $("variantBtn").disabled = !en;
+}
+
+function updateSend(){
+  const txt = $("draft").value.trim();
+  let en;
+  if (txt) en = !S.sending;
+  else if (S.mode === "audio") en = S.listening && !S.sending;
+  else en = false;
+  $("sendBtn").disabled = !en;
+}
+
+function setListening(on){
+  S.listening = on;
+  $("micChip").classList.toggle("on", on);
+  $("micBtn").classList.toggle("on", on);
+  $("micChipLabel").textContent = on ? "Слушает" : "Микрофон";
+  $("status").classList.toggle("show", on);
+  if (!on) $("status").textContent = "";
+  autoGrow($("draft"));
+  updateSend();
+}
+
+function autoGrow(t){
+  t.style.height = "42px";
+  t.style.height = Math.min(120, t.scrollHeight) + "px";
+}
+
+// ---- настройки ----
+function setSwitch(el, on){ el.classList.toggle("on", on); }
+function getSwitch(el){ return el.classList.contains("on"); }
+
+function fillSelect(sel, value){
+  for (const o of sel.options){ if (o.value === value || o.text === value){ sel.value = o.value; return; } }
+}
+
+function applySettings(s){
+  $("apiKey").value = s.api_key || "";
+  fillSelect($("modelSelect"), s.model);
+  fillSelect($("langSelect"), s.language);
+  fillSelect($("whisperSelect"), s.whisper_model);
+  fillSelect($("modeSelect"), s.response_mode);
+  S.mode = s.response_mode || "text";
+  setSwitch($("autoSwitch"), !!s.auto_answer);
+  setSwitch($("stopSwitch"), !!s.stop_mic_after_send);
+  $("audioModel").value = s.audio_model || "";
+  $("visionModel").value = s.vision_model || "";
+  $("shotPrompt").value = s.screenshot_prompt || "";
+  $("context").value = s.prompt_context || "";
+  $("bgRange").value = s.bg_opacity || 75;
+  $("bgVal").textContent = (s.bg_opacity || 75) + "%";
+  updateBgPreview(s.bg_opacity || 75);
+  applyPanelOpacity(s.bg_opacity || 75);
+  setHk("mic", s.hotkey_toggle_mic || "");
+  setHk("send", s.hotkey_send || "");
+  setHk("shot", s.hotkey_screenshot || "");
+  if (s.region_label) $("regionLabel").textContent = s.region_label;
+  // datalists
+  const fill = (id, arr) => { const dl=$(id); dl.innerHTML=""; (arr||[]).forEach(a=>{ const o=document.createElement("option"); o.value=a[0]; o.label=a[1]; dl.appendChild(o); }); };
+  fill("audioModelList", s.audio_models);
+  fill("visionModelList", s.vision_models);
+  updateSend();
+}
+
+function collectSettings(){
+  return JSON.stringify({
+    api_key: $("apiKey").value.trim(),
+    model: $("modelSelect").value,
+    language: $("langSelect").value,
+    whisper_model: $("whisperSelect").value,
+    response_mode: $("modeSelect").value,
+    auto_answer: getSwitch($("autoSwitch")),
+    stop_mic_after_send: getSwitch($("stopSwitch")),
+    audio_model: $("audioModel").value.trim(),
+    vision_model: $("visionModel").value.trim(),
+    screenshot_prompt: $("shotPrompt").value.trim(),
+    prompt_context: $("context").value,
+    bg_opacity: parseInt($("bgRange").value, 10),
+    hotkey_toggle_mic: S.hk.mic || "",
+    hotkey_send: S.hk.send || "",
+    hotkey_screenshot: S.hk.shot || "",
+  });
+}
+
+function updateBgPreview(v){
+  const o = Math.max(25, Math.min(100, v));
+  const a = (0.30 + (o-25)/75*0.65).toFixed(2);
+  $("bgPreview").style.background = "rgba(250,251,253," + a + ")";
+}
+function applyPanelOpacity(v){
+  const o = Math.max(25, Math.min(100, v));
+  const a = (0.55 + (o-25)/75*0.43).toFixed(2);
+  $("panel").style.background = "rgba(250,251,253," + a + ")";
+}
+
+function fillMics(list){
+  const sel = $("micSelect"); sel.innerHTML = "";
+  list.forEach(d => { const o=document.createElement("option"); o.value=d.id; o.textContent=d.label; if(d.selected) o.selected=true; sel.appendChild(o); });
+}
+
+// ---- хоткеи ----
+function setHk(name, val){ S.hk[name]=val; const el=document.querySelector('.hk-cap[data-hk="'+name+'"]'); el.textContent = val || "Press shortcut…"; el.classList.toggle("empty", !val); }
+
+function captureHk(el){
+  const name = el.dataset.hk;
+  el.classList.add("capturing");
+  el.textContent = "Нажми сочетание…";
+  function onKey(e){
+    e.preventDefault();
+    const mods = [];
+    if (e.ctrlKey) mods.push("Ctrl");
+    if (e.altKey) mods.push("Alt");
+    if (e.shiftKey) mods.push("Shift");
+    if (e.metaKey) mods.push("Meta");
+    let k = e.key;
+    if (["Control","Alt","Shift","Meta"].includes(k)) return; // ждём основную клавишу
+    if (k === " ") k = "Space";
+    else if (k.length === 1) k = k.toUpperCase();
+    const combo = mods.concat([k]).join("+");
+    setHk(name, combo);
+    cleanup();
+  }
+  function cleanup(){ el.classList.remove("capturing"); document.removeEventListener("keydown", onKey, true); }
+  document.addEventListener("keydown", onKey, true);
+  setTimeout(()=>{ if(el.classList.contains("capturing")){ cleanup(); setHk(name, S.hk[name]||""); } }, 6000);
+}
+
+// ---- навигация ----
+function showSettings(){ $("chatView").classList.remove("active"); $("settingsView").classList.add("active"); if(bridge) bridge.requestSettings(); }
+function showChat(){ $("settingsView").classList.remove("active"); $("chatView").classList.add("active"); }
+
+function selectTab(key){
+  document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("active", t.dataset.tab===key));
+  document.querySelectorAll(".tabpage").forEach(p=>p.classList.toggle("active", p.dataset.page===key));
+}
+
+// ---- события UI ----
+function wireUI(){
+  $("micChip").onclick = () => bridge && bridge.toggleMic();
+  $("micBtn").onclick = () => bridge && bridge.toggleMic();
+  $("openSettings").onclick = showSettings;
+  $("backBtn").onclick = showChat;
+  $("dragHandle").addEventListener("mousedown", (e)=>{ if(e.button===0 && bridge) bridge.startDrag(); });
+
+  const draft = $("draft");
+  draft.addEventListener("input", ()=>{ autoGrow(draft); if(bridge) bridge.setDraft(draft.value); updateSend(); });
+  draft.addEventListener("keydown", (e)=>{
+    if (e.key === "Enter" && !e.shiftKey){ e.preventDefault(); doSend(); }
+  });
+
+  $("sendBtn").onclick = doSend;
+  $("shotBtn").onclick = ()=> bridge && bridge.screenshot();
+  $("moreBtn").onclick = ()=> bridge && bridge.askMore();
+  $("variantBtn").onclick = ()=> bridge && bridge.askVariant();
+
+  document.querySelectorAll(".tab").forEach(t=> t.onclick = ()=>selectTab(t.dataset.tab));
+
+  $("bgRange").addEventListener("input", (e)=>{ const v=parseInt(e.target.value,10); $("bgVal").textContent=v+"%"; updateBgPreview(v); applyPanelOpacity(v); if(bridge) bridge.setBgOpacity(v); });
+  $("reloadMics").onclick = ()=> bridge && bridge.reloadMics();
+  $("modeSelect").addEventListener("change", (e)=>{ S.mode=e.target.value; updateSend(); });
+
+  $("autoSwitch").onclick = ()=> setSwitch($("autoSwitch"), !getSwitch($("autoSwitch")));
+  $("stopSwitch").onclick = ()=> setSwitch($("stopSwitch"), !getSwitch($("stopSwitch")));
+
+  document.querySelectorAll(".hk-cap").forEach(el=> el.onclick = ()=>captureHk(el));
+  document.querySelectorAll(".hk-clear").forEach(b=> b.onclick = ()=> setHk(b.dataset.clear, ""));
+
+  $("selRegion").onclick = ()=> bridge && bridge.selectRegion();
+  $("fullScreen").onclick = ()=> { if(bridge) bridge.clearRegion(); };
+
+  $("saveBtn").onclick = ()=>{ if(bridge) bridge.saveSettings(collectSettings()); showChat(); };
+  $("clearBtn").onclick = ()=> bridge && bridge.clearChat();
+  $("quitBtn").onclick = ()=> bridge && bridge.quit();
+}
+
+function doSend(){
+  const txt = $("draft").value.trim();
+  if (txt){ bridge && bridge.send($("draft").value); }
+  else if (S.mode === "audio"){ bridge && bridge.sendNow(); }
+}
+
+// ---- подключение моста ----
+function connectBridge(b){
+  bridge = b;
+  b.messagesChanged.connect((json)=> renderMessages(JSON.parse(json)));
+  b.draftChanged.connect((t)=>{ $("draft").value = t; autoGrow($("draft")); updateSend(); });
+  b.listeningChanged.connect(setListening);
+  b.sendingChanged.connect((s)=>{ S.sending=s; updateSend(); updateFollowups(); });
+  b.statusChanged.connect((t)=>{ if(S.listening){ $("status").classList.add("show"); $("status").textContent=t; } });
+  b.regionLabelChanged.connect((t)=> $("regionLabel").textContent = t);
+  b.micListChanged.connect((json)=> fillMics(JSON.parse(json)));
+  b.settingsLoaded.connect((json)=> applySettings(JSON.parse(json)));
+  b.ready();
+}
+
+// Демо-режим: когда страницу открыли в обычном браузере (без Qt-моста) —
+// показываем макет 1:1 с примерами. В реальном приложении не срабатывает.
+function demoMode(){
+  applyPanelOpacity(80);
+  renderMessages([
+    { role:"user", text:"Что такое замыкание в JavaScript?" },
+    { role:"assistant",
+      text:"Замыкание — функция вместе с её лексическим окружением: она «помнит» переменные из области, где была создана.",
+      html:'Замыкание — функция вместе с её лексическим окружением: она «помнит» переменные из области, где была создана.<div class="codeblock">function counter() {\n  let n = 0;\n  return () =&gt; ++n;\n}</div>' },
+  ]);
+  S.hasAnswer = true; updateFollowups();
+}
+
+window.addEventListener("DOMContentLoaded", ()=>{
+  wireUI();
+  if (typeof QWebChannel !== "undefined" && window.qt && qt.webChannelTransport){
+    new QWebChannel(qt.webChannelTransport, (channel)=> connectBridge(channel.objects.bridge));
+  } else {
+    demoMode();
+  }
+});
+</script>
+</body>
+</html>
