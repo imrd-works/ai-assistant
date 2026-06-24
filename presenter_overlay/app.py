@@ -39,6 +39,14 @@ def main() -> int:
     overlay = OverlayApp(state)
     overlay.show()
 
+    # Фоновая проверка обновлений (тихо, без блокировки). Включается, когда
+    # задан репозиторий в updater.UPDATE_REPO / PRESENTER_OVERLAY_REPO.
+    try:
+        from .updater import check_async
+        check_async(state)
+    except Exception:
+        pass
+
     return app.exec()
 
 

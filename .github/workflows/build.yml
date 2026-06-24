@@ -1,0 +1,97 @@
+name: Build & Release
+
+# Запускается, когда пушишь тег версии, например:  git tag v2.1.0 && git push origin v2.1.0
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:   # можно запустить вручную из вкладки Actions
+
+permissions:
+  contents: write       # нужно, чтобы прикреплять файлы к Release
+
+jobs:
+  # ----------------------------- WINDOWS -----------------------------
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build app (PyInstaller)
+        run: pyinstaller Sufler.spec --noconfirm
+
+      - name: Build installer (Inno Setup)
+        run: |
+          choco install innosetup --no-progress -y
+          $ver = "${{ github.ref_name }}".TrimStart('v')
+          if (-not $ver) { $ver = "0.0.0" }
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "/DMyAppVersion=$ver" packaging\windows\installer.iss
+        shell: pwsh
+
+      - name: Upload to Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/Sufler-Setup-*.exe
+
+      - name: Upload artifact (for manual runs)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Sufler-Windows
+          path: dist/Sufler-Setup-*.exe
+
+  # ------------------------------ MACOS ------------------------------
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build app (PyInstaller)
+        run: pyinstaller Sufler.spec --noconfirm
+
+      - name: Make DMG
+        run: |
+          VER="${GITHUB_REF_NAME#v}"
+          [ -z "$VER" ] && VER="0.0.0"
+          mkdir -p dist/dmg
+          cp -R "dist/Sufler.app" dist/dmg/
+          ln -s /Applications dist/dmg/Applications
+          hdiutil create -volname "Суфлёр" -srcfolder dist/dmg -ov -format UDZO "dist/Sufler-$VER.dmg"
+
+      - name: Upload to Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/Sufler-*.dmg
+
+      - name: Upload artifact (for manual runs)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Sufler-macOS
+          path: dist/Sufler-*.dmg
+
+# ---------------------------------------------------------------------
+# ПОДПИСЬ КОДА (добавить позже, без неё пользователи увидят предупреждения):
+#  - macOS: импортировать сертификат Developer ID, codesign --deep --options runtime,
+#           затем notarytool submit + stapler staple. Секреты класть в Settings → Secrets.
+#  - Windows: signtool sign /f cert.pfx ... по сертификату для подписи кода.
